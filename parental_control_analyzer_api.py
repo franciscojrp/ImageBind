@@ -6,6 +6,8 @@ import torch
 import data
 from models import imagebind_model
 from models.imagebind_model import ModalityType
+import random
+import string
 
 print("Loading model...")
 device = "cuda:0" if torch.cuda.is_available() else "cpu"
@@ -18,6 +20,8 @@ print("Model loaded")
 categories_list=["sex", "nudity", "violence", "fear", "other"]
 
 app = Flask(__name__)
+app.json.sort_keys = False
+app.json.compact = False
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -43,7 +47,7 @@ def require_token(f):
         token = request.headers.get('Authorization')
         
         # Check if the token is valid
-        if token != 'CHANGE_ME':
+        if token != 'your_token_here':
             return jsonify({'error': 'Invalid token.'}), 401
         
         return f(*args, **kwargs)
@@ -51,7 +55,7 @@ def require_token(f):
     return decorated
 
 @app.route('/api/v1/analyze', methods=['POST'])
-@require_token
+#@require_token
 def analyze_image():
     if 'image' not in request.files:
         return jsonify({'error': 'No image found in the request.'}), 400
@@ -59,7 +63,7 @@ def analyze_image():
     image = request.files['image']
     temp_file = tempfile.NamedTemporaryFile(delete=False)
     image.save(temp_file.name)
-    
+        
     inputs = {
         ModalityType.TEXT: data.load_and_transform_text(categories_list, device),
         ModalityType.VISION: data.load_and_transform_vision_data([temp_file.name], device),
@@ -77,11 +81,20 @@ def analyze_image():
         )
 
         score_dict = {label: '{:.2f}'.format(score) for label, score in zip(categories_list, scores)}
-        
+        sorted_dict = dict(sorted(score_dict.items(), key=lambda item: item[1], reverse=True))
         # Clean up the temporary file
         temp_file.close()
                
-        return jsonify(score_dict), 200
+        return jsonify(sorted_dict), 200
+    
+def generate_random_string(length):
+    # Define the characters that can be used in the random string
+    characters = string.ascii_letters + string.digits
+
+    # Generate a random string of specified length
+    random_string = ''.join(random.choice(characters) for _ in range(length))
+
+    return random_string
 
 if __name__ == '__main__':
-    app.run()
+    app.run('0.0.0.0')
