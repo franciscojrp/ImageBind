@@ -30,7 +30,7 @@ logger = app.logger
 @app.before_request
 def log_request_info():
     logger.info('Request: %s %s', request.method, request.url)
-    # logger.debug('Request Headers: %s', request.headers)
+    logger.debug('Request Headers: %s', request.headers)
     # logger.debug('Request Body: %s', request.get_data(as_text=True))
 
 @app.after_request
@@ -68,6 +68,13 @@ def analyze_image():
         ModalityType.TEXT: data.load_and_transform_text(categories_list, device),
         ModalityType.VISION: data.load_and_transform_vision_data([temp_file.name], device),
     }
+
+    if 'audio' in request.files:
+        audio = request.files['audio']
+        temp_audio_file = tempfile.NamedTemporaryFile(delete=False)
+        audio.save(temp_audio_file.name)
+        inputs.update({ModalityType.AUDIO: data.load_and_transform_audio_data([temp_audio_file.name], device)});
+        logger.info('Audio included')
 
     with torch.no_grad():
         embeddings = model(inputs)
