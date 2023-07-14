@@ -1,4 +1,6 @@
 import logging
+import shutil
+import uuid
 from flask import Flask, request, jsonify
 from functools import wraps
 import tempfile
@@ -8,6 +10,9 @@ from models import imagebind_model
 from models.imagebind_model import ModalityType
 import random
 import string
+import json
+
+STORE_INPUT_FILES_AND_RESULTS = False
 
 print("Loading model...")
 device = "cuda:0" if torch.cuda.is_available() else "cpu"
@@ -55,7 +60,7 @@ def require_token(f):
     return decorated
 
 @app.route('/api/v1/analyze', methods=['POST'])
-#@require_token
+@require_token
 def analyze_image():
     if 'image' not in request.files:
         return jsonify({'error': 'No image found in the request.'}), 400
@@ -63,6 +68,10 @@ def analyze_image():
     image = request.files['image']
     temp_file = tempfile.NamedTemporaryFile(delete=False)
     image.save(temp_file.name)
+
+    random_filename = str(uuid.uuid4())
+    if STORE_INPUT_FILES_AND_RESULTS:
+        shutil.copy(temp_file.name, random_filename + '.jpg')
         
     inputs = {
         ModalityType.TEXT: data.load_and_transform_text(categories_list, device),
@@ -75,6 +84,26 @@ def analyze_image():
         audio.save(temp_audio_file.name)
         inputs.update({ModalityType.AUDIO: data.load_and_transform_audio_data([temp_audio_file.name], device)});
         logger.info('Audio included')
+        if STORE_INPUT_FILES_AND_RESULTS:
+            shutil.copy(temp_audio_file.name, random_filename + '.wav')
+            #Predict with no audio and store results
+            with torch.no_grad():
+                embeddings = model(inputs)
+
+                scores = (
+                    torch.softmax(
+                        embeddings[ModalityType.VISION] @ embeddings[ModalityType.TEXT].T, dim=-1
+                    )
+                    .squeeze(0)
+                    .tolist()
+                )
+
+                score_dict = {label: '{:.2f}'.format(score) for label, score in zip(categories_list, scores)}
+                sorted_dict = dict(sorted(score_dict.items(), key=lambda item: item[1], reverse=True))
+                
+                file = open(random_filename + '_no_audio.txt', 'w')
+                json.dump(sorted_dict, file)
+                file.close()
 
     with torch.no_grad():
         embeddings = model(inputs)
@@ -89,8 +118,15 @@ def analyze_image():
 
         score_dict = {label: '{:.2f}'.format(score) for label, score in zip(categories_list, scores)}
         sorted_dict = dict(sorted(score_dict.items(), key=lambda item: item[1], reverse=True))
-        # Clean up the temporary file
+
+        if STORE_INPUT_FILES_AND_RESULTS:
+            file = open(random_filename + '.txt', 'w')
+            json.dump(sorted_dict, file)
+            file.close()
+        # Clean up the temporary files
         temp_file.close()
+        if 'audio' in request.files:
+            temp_audio_file.close()
                
         return jsonify(sorted_dict), 200
     
